@@ -5,87 +5,177 @@
 
 /**
  * TODO:
- * 1. Get a strategy to learn spells
- * 2. Update nextAction logic based on learned spells
+ * Update learning spells function into BFS somehow?
  */
 
-function calcMissingScore(recipe, inventory) {
-  let missingScore = 0;
-  // console.error(recipe, inventory)
-  for (let i = 0; i < 4; i++) {
-    missingScore += (i + 1) * Math.min(0, recipe[i] + inventory[wi])
+const MAX_INGREDIENTS = 10;
+
+class PathFinding {
+  static positionToInteger(position, state) {
+    // Using the power of math to find ensure we never return two nodes with the same ID
+    const ingredient = position[0] +  (MAX_INGREDIENTS + 1) * (position[1] + (MAX_INGREDIENTS + 1) * (position[2] + (MAX_INGREDIENTS + 1) * position[3]))
+    const castableState = parseInt(Object.values(state).join``,2) * Math.pow(MAX_INGREDIENTS + 1, 5);
+    return ingredient * castableState
   }
-  return missingScore
+
 }
-
-function getBestSpellForTier (castActions, tier, inventory) {
-
-  let bestSpells = castActions.reduce((max, a) => max.delta[tier] > a.delta[tier] ? max: a)
-  if (bestSpells.length > 1) {
-    bestSpells.forEach(s => {
-      console.error(s)
-    })
-    let result = bestSpells.reduce((max, s) => max.value > s.value || !s.castable && inventoryIsNotTooFull(s, inventory) ? max : s)
-    console.error(result)
-    return result
-  } else {
-    console.error(`Best Spells ${bestSpells.id}`)
-    return bestSpells
+// Just learning first spells
+function chooseSpell (actions, turn) {
+  if(turn < 6) {
+    return actions.find(action => action.type === 'LEARN')
   }
+
+  return null
 }
 
-function findFreeSpell(learningActions) {
-  return learningActions.find(a => {
-    return Math.min(...a.delta) >= 0
-  })
-}
-
-function haveEnoughToCast(spell, inventory) {
-  return calcMissingScore(spell.delta, inventory) === 0;
-}
-
-function inventoryIsNotTooFull(spell, inventory) {
-  let spacesRequiredForSpell = 0
-  let itemsInInv = 0
-  for (let i = 0; i < 4; i++) {
-    spacesRequiredForSpell += spell[i]
-    itemsInInv += inventory[i]
+function canBuy(spell, inventory) {
+  for(let i=0; i<spell.length; i++) {
+    if (spell[i] + inventory[i] < 0) return false;
   }
-  return spacesRequiredForSpell + itemsInInv <= 10
+  return true
 }
 
-function nextAction (goal, inventory, actions, goalId, learningActions, castActions) {
-  // priority 1
-  let freeSpell = findFreeSpell(learningActions)
-  if (freeSpell){
-    // if we have enough to learn it
-    if ((freeSpell.tomeIndex + freeSpell.taxCount) < inventory[0]) {
-      return freeSpell
-    } else {
-      // return the action with the max blue
-      return castActions.reduce((max, a) => max.delta[0] > a.delta[0] ? max : a)
+function sumArray (a, b) {
+  return a.map((val, index) => val + b[index])
+}
+
+function BFS (map, getNeighbors, from, to, actions) {
+  const startTime = +new Date(); // keep note of how long we've been here
+  const discovered = new Set();
+  const queue = [];
+  queue.push({node: from, state: map, step: 0});
+  discovered.add(PathFinding.positionToInteger(from, map))
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    visited++
+
+    // Can't take too long
+    // console.error(`Time ${+new Date() - startTime}`)
+    if (+new Date() - startTime > 30) return null;
+
+    if (current.node.every((val, index) => val >= to[index])) {
+      return current
     }
-  }
 
-  for (let i=3; i>=0; i--) {
-    console.error(goal, inventory, i)
-    if (inventory[i] < -goal[i]) {
-      let bestSpell = getBestSpellForTier(castActions, i, inventory)
-      if (haveEnoughToCast(bestSpell, inventory)) {
-        console.error(`Casting Spell ${bestSpell.id}`)
-        return actions.find(action => action.id === bestSpell.id)
-      } else {
-        console.error(`Finding new target ${bestSpell.delta}`)
-        return nextAction(bestSpell.delta, inventory, actions, bestSpell.id, learningActions, castActions)
+    // There's a gif at https://en.wikipedia.org/wiki/Breadth-first_search that helped me understand what this is doing
+    getNeighbors(current.state, current.node, actions).forEach(node => {
+      const neightborID = PathFinding.positionToInteger(node.node, node.state)
+      if (!discovered.has(neightborID)) {
+        discovered.add(neightborID)
+        if (current.step + 1 <= 10) {
+          queue.push({
+            ...current,
+            node: node.node,
+            action: node.action,
+            state: node.state,
+            parent: current,
+            step: current.step++
+          })
+        }
       }
+    })
+  }
+}
+function getNeighbors (state, ingredients, actions) {
+  const a = +new Date(); // for debugging time
+  const neighbors = [];
 
+  const canRest = Object.values(state).some(castable => !castable)
+  // console.error({canRest, state}, Object.values(state))
+
+  if(canRest) {
+    const newState = {};
+    for(let key in state) {
+      newState[key] = 1
+    }
+    neighbors.push({
+      node: ingredients,
+      action: {type: 'REST'},
+      state: newState
+    })
+  }
+
+  for(let action of actions) {
+    if (state[action.id]) {
+      const isPossible = canBuy(action.delta, ingredients)
+      if (isPossible) {
+        const sum = sumArray(action.delta, ingredients)
+        if (sum.reduce((a, b) => a+b, 0) <= 10) {
+          neighbors.push({
+            node: sum,
+            action,
+            state: {
+              ...state,
+              [action.id]: 0
+            }
+          })
+        }
+      }
     }
   }
-  return actions.find(action => action.id === goalId)
+
+  if (neighbors.length === 0) {
+    // console.error({state, ingredients, actions})
+  }
+
+  return neighbors;
 }
+
+function findPossibleAction(ingredients, actions) {
+  for (let action of actions) {
+    if ((action.castable || action.type !== 'CAST')
+      && ingredients.every((val, index) => val >= -action.delta[index])
+      && sumArray(ingredients, action.delta).reduce((a, b) => a+b) <= 10)
+    {
+      return action
+    }
+  }
+  return null
+}
+
+let visited = 0 // global to keep track also I'm lazy
+
+function nextAction (goal, inventory, actions, goalId) {
+  const a = +new Date() // for debugging time
+  visited = 0
+  const state = {};
+  for(let action of actions) {
+    if (action.type === 'CAST') {
+      state[action.id] = action.castable ? 1 : 0
+    }
+  }
+
+  // Used a few different sources to make this. research Breadth First Search to understand the strategy here
+  let path = BFS(
+    state,
+    getNeighbors,
+    inventory,
+    goal.map(x => -x),
+    actions.filter(action => action.type ==='CAST'),
+  )
+
+  console.error('bfs time', +new Date() - a, {visited});
+  if(path) {
+    // iterate to the top of the path
+    while(path.parent && path.parent.action) {
+      path = path.parent
+    }
+    if(path && path.action) {
+      // return the first action in the path
+      return path.action
+    }
+  }
+  // Most likely timed out
+  console.error('NO PATH')
+  return null
+}
+
+let turn = -1
 
 // game loop
 while (true) {
+  turn++;
   const actionCount = parseInt(readline()); // the number of spells and recipes in play
   let actions = []
   let brewActions = []
@@ -111,21 +201,18 @@ while (true) {
         action.cost = (delta0 + delta1 * 2 + delta2 * 3 + delta3 * 4)
         brewActions.push(action)
         actions.push(action)
-        // console.error(action.delta)
-        // console.error(cost)
         break
       case 'CAST':
         action.value = (delta0 + delta1 * 2 + delta2 * 3 + delta3 * 4)
-        // console.error(`${action.id} Spell Value: ${action.value}`)
         castActions.push(action)
         actions.push(action)
-        // console.error(action.castable)
         break
       case 'OPPONENT_CAST':
         theirCastActions.push(action)
         break
       case 'LEARN':
         learningActions.push(action)
+        actions.push(action)
         break
     }
     // console.error(action)
@@ -149,21 +236,36 @@ while (true) {
       theirScore = score
     }
   }
-  brewActions.sort((a,b) => a.price - b.price)
-  const goal = brewActions[0];
-  const action = nextAction(goal.delta, myInv, actions, goal.id, learningActions, castActions)
-  console.error(action)
-  //
-  if(action.type === 'CAST' && !action.castable) {
-    console.log('REST')
-  } else {
-    console.log(`${action.type} ${action.id}`)
+  /**
+   * LEARNING SPELL HERE INSTEAD?
+   */
+  const spell = chooseSpell(actions, turn)
+  if (spell) {
+    console.log(`${spell.type} ${spell.id}`)
+    continue
   }
 
-  // Write an action using console.log()
-  // To debug: console.error('Debug messages...');
+  // highest price first
+  brewActions.sort((a,b) => b.price - a.price)
+  const goal = brewActions[0];
 
-
-  // in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
-  // console.log(`BREW ${brewActions[0].id}`);
+  if (canBuy(goal.delta, myInv)) {
+    console.log(`${goal.type} ${goal.id}`)
+  } else {
+    const action = nextAction(goal.delta, myInv, actions, brewActions)
+    // nextAction will return null if the BFS took too long to find a possible route to the potion
+    if (!action) {
+      // So we just find a quick and easy spell to cast
+      const action = findPossibleAction(myInv, castActions)
+      // If there are no quick and easy spells, then rest
+      if (!action) {
+        console.log('REST')
+      } else {
+        console.log(`${action.type} ${action.id}`)
+      }
+    }
+    else {
+      console.log(`${action.type} ${action.id}`)
+    }
+  }
 }
